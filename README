@@ -1,0 +1,1 @@
+Interface to the DF Robot SEN0545 rainfall sensor module. You need to provide TX and RX functions. In my implementation I'm using an i2c to serial adapter.
