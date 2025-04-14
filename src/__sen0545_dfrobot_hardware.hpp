@@ -21,9 +21,12 @@
 // -----------------------------------------------------------------------------------------------
 // -----------------------------------------------------------------------------------------------
 
-#define FRAME_HEADER         0x3A
-#define FRAME_PROPERTY_READ  0
-#define FRAME_PROPERTY_WRITE 1
+static inline constexpr uint8_t FRAME_HEADER = 0x3A;
+
+enum class FrameProperty : uint8_t {
+    Read = 0,
+    Write = 1
+};
 
 enum class FrameType : uint8_t {
     FirmwareVersion = 0,
@@ -46,7 +49,7 @@ enum class FrameType : uint8_t {
     SleepMode = 17
 };
 
-#define FRAME_FCS_NULL 0x00
+static inline constexpr uint8_t FRAME_FCS = 0x00;
 
 // Type 0: Firmware Version - two 8-bit values
 typedef struct {
@@ -152,9 +155,13 @@ typedef struct {
     }
 } __attribute__ ((__packed__)) frame_data_enterorexit_t;
 
-// Type 5: Output Frequency - integer range 0-9
+// Type 5: Output Frequency - integer range 0-9: 0=disabled, 1-9=frequency in 50ms units
 typedef struct {
-    uint16_t frequency;    // 0-9, 0=disabled, 1-9=frequency in 50ms units
+    enum class frequency_t : uint16_t {
+        Disabled = 0,
+        Minimum = 1,
+        Maximum = 9
+    } frequency;
 } __attribute__ ((__packed__)) frame_data_output_frequency_t;
 
 // Types 6-8: V Thresholds - 16-bit range 0-65535
@@ -169,12 +176,15 @@ typedef struct {
 
 // Types 12-14: N Thresholds - range 1-10
 typedef struct {
-    uint16_t count;
+    enum class count_t : uint16_t {
+        Minimum = 1,
+        Maximum = 10
+    } count;
 } __attribute__ ((__packed__)) frame_data_threshold_n_t;
 
-// Type 16: Temperature Reading - command value
+// Type 16: Temperature Reading - command value: always 0 for reading temperature
 typedef struct {
-    uint16_t command;    // Always 0 for reading temperature
+    uint16_t command;
 } __attribute__ ((__packed__)) frame_data_temperature_t;
 
 // Union of all frame data types
@@ -191,31 +201,36 @@ typedef union {
     frame_data_enterorexit_t ambient_light;
     frame_data_temperature_t temperature;
     frame_data_enterorexit_t sleep_mode;
-    uint16_t value;
-    uint8_t bytes [2];
+    uint8_t __bytes [2];
 } __attribute__ ((__packed__)) frame_data_t;
 
 typedef struct {
-    uint8_t flags;
+    FrameProperty property : 1;
+    FrameType type : 7;
+} __attribute__ ((__packed__)) frame_flags_t;
+
+typedef struct {
+    frame_flags_t flags;
     frame_data_t data;
 } __attribute__ ((__packed__)) frame_command_t;
-#define FRAME_FLAGS_PROPERTY_READ_OR_WRITE_DECODE(flags) (((uint8_t) (flags) >> 7) & 0x01U)
-#define FRAME_FLAGS_TYPE_DECODE(flags)                   ((uint8_t) (flags) & 0x7FU)
-#define FRAME_FLAGS_PROPERTY_READ_OR_WRITE_ENCODE(value) ((uint8_t) (((uint8_t) (value) << 7) & 0x80U))
-#define FRAME_FLAGS_TYPE_ENCODE(value)                   ((uint8_t) ((uint8_t) (value) & 0x7FU))
-#define FRAME_FLAGS_MAKE(property_read_or_write, type)   (uint8_t) (FRAME_FLAGS_PROPERTY_READ_OR_WRITE_ENCODE (property_read_or_write) | FRAME_FLAGS_TYPE_ENCODE (type))
-#define FRAME_TYPES_MAKE(value16)                        { (uint8_t) ((value16 >> 8) & 0xFF), (uint8_t) (value16 & 0xFF) }
+
+#define FRAME_DATA_ENCODE(type)                                                          \
+    {                                                                                    \
+        .__bytes = {(uint8_t) ((reinterpret_cast<const uint16_t &> (type) >> 8) & 0xFF), \
+                    (uint8_t) (reinterpret_cast<const uint16_t &> (type) & 0xFF) }       \
+    }
+#define FRAME_DATA_DECODE(data) (uint16_t) ((data).__bytes [0] << 8) | (uint16_t) ((data).__bytes [1])
 
 typedef struct {
     const uint8_t header = FRAME_HEADER;
     frame_command_t data;
-    uint8_t fcs = FRAME_FCS_NULL;
+    uint8_t fcs = FRAME_FCS;
 } __attribute__ ((__packed__)) frame_t;
 
 // -----------------------------------------------------------------------------------------------
 // -----------------------------------------------------------------------------------------------
 
-// static inline uint8_t _calculate_crc8 (const uint8_t *data, size_t len) {
+// static inline uint8_t crc8_poly0x31 (const uint8_t *data, size_t len) {
 //     uint8_t crc = 0xFF;
 //     while (len--) {
 //         crc ^= *data++;
@@ -225,23 +240,23 @@ typedef struct {
 //     return crc;
 // }
 
-static inline constexpr uint32_t __crc8_bit (const uint32_t crc) {
+static inline constexpr uint32_t __crc8x31_bit (const uint32_t crc) {
     return (crc << 1) ^ ((crc & 0x100) ? 0x31 : 0);
 }
-static inline constexpr uint32_t __crc8_byte (const uint32_t crc) {
-    return __crc8_bit (__crc8_bit (__crc8_bit (__crc8_bit (__crc8_bit (__crc8_bit (__crc8_bit (__crc8_bit (crc))))))));
+static inline constexpr uint32_t __crc8x31_byte (const uint32_t crc) {
+    return __crc8x31_bit (__crc8x31_bit (__crc8x31_bit (__crc8x31_bit (__crc8x31_bit (__crc8x31_bit (__crc8x31_bit (__crc8x31_bit (crc))))))));
 }
 template <size_t INDEX, size_t SIZE>
-static inline constexpr uint32_t __crc8_bytes (const uint32_t crc, const uint8_t *data) {
+static inline constexpr uint32_t __crc8x31_bytes (const uint32_t crc, const uint8_t *data) {
     static_assert (SIZE <= 16, "crc8 limited to 16 bytes for performance reasons");
     if constexpr (INDEX < SIZE)
-        return __crc8_bytes<INDEX + 1, SIZE> (__crc8_byte (crc ^ data [INDEX]), data);
+        return __crc8x31_bytes<INDEX + 1, SIZE> (__crc8x31_byte (crc ^ data [INDEX]), data);
     else
         return crc;
 }
 template <size_t SIZE>
-static inline constexpr uint8_t calculate_crc8 (const uint8_t *data) {
-    return __crc8_bytes<0, SIZE> (0x000000FF, data) & 0xFF;
+static inline constexpr uint8_t crc8_poly0x31 (const uint8_t *data) {
+    return __crc8x31_bytes<0, SIZE> (0x000000FF, data) & 0xFF;
 }
 
 // -----------------------------------------------------------------------------------------------
@@ -258,8 +273,8 @@ public:
         rx_function (rx),
         bk_function (bk) { }
 
-    bool transmit (const frame_command_t &command) const {
-        const frame_t frame { .data = command, .fcs = calculate_crc8<sizeof (frame_command_t)> (reinterpret_cast<const uint8_t *> (&command)) };
+    bool transmit (const frame_command_t &data) const {
+        const frame_t frame { .data = data, .fcs = crc8_poly0x31<sizeof (frame_command_t)> (reinterpret_cast<const uint8_t *> (&data)) };
         const uint8_t *frame_raw = reinterpret_cast<const uint8_t *> (&frame);
         DEBUG_SEN0545_PRINTF ("SEN0545::TX: %02X %02X %02X %02X %02X\n", frame_raw [0], frame_raw [1], frame_raw [2], frame_raw [3], frame_raw [4]);
         return tx_function (frame_raw, sizeof (frame_t)) == sizeof (frame_t);
@@ -272,18 +287,16 @@ public:
         unsigned long startTime = millis ();
         // XXX. needs to be more robust to prevent lockup
         while (bytesRead < sizeof (frame_t)) {
-            if constexpr (! blocking) {
+            if constexpr (! blocking)
                 if ((millis () - startTime) >= timeout)
                     break;
-            }
             if (bytesRead == 0) {
                 if (rx_function (&frame_raw [0], 1) != 1) {
                     if constexpr (blocking) {
                         if (bk_function)
                             bk_function ();
-                    } else {
+                    } else
                         return std::nullopt;
-                    }
                     continue;
                 }
                 if (frame.header != FRAME_HEADER)
@@ -295,9 +308,8 @@ public:
                     if constexpr (blocking) {
                         if (bk_function)
                             bk_function ();
-                    } else {
+                    } else
                         return std::nullopt;
-                    }
                     continue;
                 }
                 bytesRead += result;
@@ -308,7 +320,7 @@ public:
             return std::nullopt;
         }
         DEBUG_SEN0545_PRINTF ("SEN0545::RX: %02X %02X %02X %02X %02X\n", frame_raw [0], frame_raw [1], frame_raw [2], frame_raw [3], frame_raw [4]);
-        const uint8_t fcs = calculate_crc8<sizeof (frame_command_t)> (reinterpret_cast<uint8_t *> (&frame.data));
+        const uint8_t fcs = crc8_poly0x31<sizeof (frame_command_t)> (reinterpret_cast<uint8_t *> (&frame.data));
         if (fcs != frame.fcs) {
             DEBUG_SEN0545_PRINTF ("SEN0545::RX: mismatched fcs, received 0x%02X, calculated 0x%02X\n", frame.fcs, fcs);
             return std::nullopt;
@@ -332,42 +344,41 @@ public:
 
     template <typename T>
     bool read (const FrameType type, T &value) const {
-        if (! transceiver.transmit (frame_command_t { .flags = FRAME_FLAGS_MAKE (FRAME_PROPERTY_READ, type) }))
+        if (! transceiver.transmit (frame_command_t {
+                .flags = { .property = FrameProperty::Read, .type = type }
+        }))
             return false;
         delay (1);
         const auto response = transceiver.receive ();
-        if (! response || static_cast<FrameType> (FRAME_FLAGS_TYPE_DECODE (response->flags)) != type)
+        if (! response || response->flags.type != type)
             return false;
-        value = static_cast<T> ((uint16_t) (response->data.bytes [0] << 8) | (uint16_t) (response->data.bytes [1]));
+        value = static_cast<T> (FRAME_DATA_DECODE (response->data));
         return true;
     }
     template <typename T>
     bool write (const FrameType type, const T &value) const {
-        const uint16_t value16 = reinterpret_cast<const uint16_t &> (value);
-        return transceiver.transmit (frame_command_t { .flags = FRAME_FLAGS_MAKE (FRAME_PROPERTY_WRITE, type), .data = { .bytes = FRAME_TYPES_MAKE (value16) } });
+        return transceiver.transmit (frame_command_t {
+            .flags = { .property = FrameProperty::Write, .type = type },
+            .data = FRAME_DATA_ENCODE (value)
+        });
     }
 
-    bool _enterOrExitMode (const FrameType type, const bool enabled) const {
+    bool _setEnterOrExitMode (const FrameType type, const bool enabled) const {
         return write (type, frame_data_enterorexit_t { .command = enabled ? frame_data_enterorexit_t::command_t::Enter : frame_data_enterorexit_t::command_t::Exit });
     }
 
     //
 
-    struct FirmwareVersion {
-        uint8_t major, backup;
-    };
+    using FirmwareVersion = frame_data_firmware_version_t;
     bool getFirmwareVersion (FirmwareVersion &version) const {
-        uint16_t result;
-        if (! read (FrameType::FirmwareVersion, result))
-            return false;
-        version.major = (result >> 8) & 0xFF;
-        version.backup = result & 0xFF;
-        return true;
+        return read (FrameType::FirmwareVersion, version);
     }
-    bool getSystemStatus (frame_data_system_status_t::status_t &status) const {
+    using SystemStatus = frame_data_system_status_t::status_t;
+    bool getSystemStatus (SystemStatus &status) const {
         return read (FrameType::SystemStatus, status);
     }
-    bool getRainfallStatus (frame_data_rainfall_status_t::status_t &status) const {
+    using RainfallStatus = frame_data_rainfall_status_t::status_t;
+    bool getRainfallStatus (RainfallStatus &status) const {
         return read (FrameType::RainfallStatus, status);
     }
     bool performCalibration () const {
@@ -377,12 +388,15 @@ public:
         return write (FrameType::OpticalSystem, frame_data_optical_system_t { .command = frame_data_optical_system_t::command_t::SendValue });
     }
     bool setRealtimeMode (const bool enabled) const {
-        return _enterOrExitMode (FrameType::RealtimeRainfall, enabled);
+        return _setEnterOrExitMode (FrameType::RealtimeRainfall, enabled);
     }
-    bool setOutputFrequency (const uint16_t frequency) const {
-        return (frequency > 9) ? false : write (FrameType::OutputFrequency, frame_data_output_frequency_t { .frequency = frequency });
+    using FrequencyType = uint16_t;
+    bool setOutputFrequency (const FrequencyType frequency) const {
+        if (frequency > static_cast<uint16_t> (frame_data_output_frequency_t::frequency_t::Maximum))
+            return false;
+        return write (FrameType::OutputFrequency, frame_data_output_frequency_t { .frequency = static_cast<frame_data_output_frequency_t::frequency_t> (frequency) });
     }
-    bool getOutputFrequency (uint16_t &frequency) const {
+    bool getOutputFrequency (FrequencyType &frequency) const {
         return read (FrameType::OutputFrequency, frequency);
     }
     enum class Thresholds : uint8_t { V1 = static_cast<uint8_t> (FrameType::ThresholdV1),
@@ -395,27 +409,33 @@ public:
                                       N2 = static_cast<uint8_t> (FrameType::ThresholdN2),
                                       N3 = static_cast<uint8_t> (FrameType::ThresholdN3)
     };
-    bool setThreshold (const Thresholds type, const uint16_t value) const {
+    using ThresholdType = uint16_t;
+    bool setThreshold (const Thresholds type, const ThresholdType value) const {
         if (type == Thresholds::V1 || type == Thresholds::V2 || type == Thresholds::V3)
             return write (static_cast<FrameType> (type), frame_data_threshold_v_t { .threshold = value });
-        else if (type == Thresholds::S1 || type == Thresholds::S2 || type == Thresholds::S3)
+        if (type == Thresholds::S1 || type == Thresholds::S2 || type == Thresholds::S3)
             return write (static_cast<FrameType> (type), frame_data_threshold_s_t { .threshold = value });
-        else if (type == Thresholds::N1 || type == Thresholds::N2 || type == Thresholds::N3 && (value > 0 && value <= 10))
-            return write (static_cast<FrameType> (type), frame_data_threshold_n_t { .count = value });
-        else
-            return false;
+        if (type == Thresholds::N1 || type == Thresholds::N2 || type == Thresholds::N3)
+            if ((value >= static_cast<uint8_t> (frame_data_threshold_n_t::count_t::Minimum) && value <= static_cast<uint8_t> (frame_data_threshold_n_t::count_t::Maximum)))
+                return write (static_cast<FrameType> (type), frame_data_threshold_n_t { .count = static_cast<frame_data_threshold_n_t::count_t> (value) });
+        return false;
     }
-    bool getThreshold (const Thresholds type, uint16_t &value) const {
+    bool getThreshold (const Thresholds type, ThresholdType &value) const {
         return read (static_cast<FrameType> (type), value);
     }
-    bool getTemperature (uint16_t &temp) const {
-        return read (FrameType::Temperature, temp);
+    using TemperatureType = float;
+    bool getTemperature (TemperatureType &value) const {
+        uint16_t temp;
+        if (! read (FrameType::Temperature, temp))
+            return false;
+        value = static_cast<float> (temp) / 1000.0f;
+        return true;
     }
     bool setAmbientLightMode (const bool enabled) const {
-        return _enterOrExitMode (FrameType::AmbientLight, enabled);
+        return _setEnterOrExitMode (FrameType::AmbientLight, enabled);
     }
     bool setSleepMode (const bool enabled) const {
-        return _enterOrExitMode (FrameType::SleepMode, enabled);
+        return _setEnterOrExitMode (FrameType::SleepMode, enabled);
     }
 
 private:

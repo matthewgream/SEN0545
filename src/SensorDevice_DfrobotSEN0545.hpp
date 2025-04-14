@@ -57,12 +57,10 @@ public:
         uint8_t uart;
     };
 
-    using RainfallType = frame_data_rainfall_status_t::status_t;
-    using StatusType = frame_data_system_status_t::status_t;
     struct Measurements {
-        RainfallType rainfall;
-        float t;
-        StatusType s;
+        RainSensor::RainfallStatus rainfall;
+        RainSensor::TemperatureType t;
+        RainSensor::SystemStatus s;
     };
 
     struct Information {
@@ -89,7 +87,7 @@ public:
         //     return ComponentResult (false, "RainSensor::setSleepMode (false)");
         if (! _device.getFirmwareVersion (_info.firmware))
             return Result (false, "RainSensor::getFirmwareVersion");
-        StatusType status;
+        RainSensor::SystemStatus status;
         if (! _device.getSystemStatus (status))
             return Result (false, "RainSensor::getSystemStatus");
         _measurements.s = status;
@@ -110,16 +108,16 @@ public:
     }
 
     MeasurementResult measurementsExecute () {
-        uint16_t temperature;
-        RainfallType rainfall;
-        StatusType status;
+        RainSensor::TemperatureType temperature;
+        RainSensor::RainfallStatus rainfall;
+        RainSensor::SystemStatus status;
         if (! _device.getTemperature (temperature))
             return MeasurementResult (MeasurementError, "RainSensor::getTemperature");
         if (! _device.getRainfallStatus (rainfall))
             return MeasurementResult (MeasurementError, "RainSensor::getRainfallStatus");
         if (! _device.getSystemStatus (status))
             return MeasurementResult (MeasurementError, "RainSensor::getSystemStatus");
-        _measurements.t = static_cast<float> (temperature) / 1000.0f;
+        _measurements.t = temperature;
         _measurements.s = status;
         _measurements.rainfall = rainfall;
         return MeasurementUpdatedAndValid;
