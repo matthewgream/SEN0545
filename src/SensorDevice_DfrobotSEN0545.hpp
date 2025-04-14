@@ -66,9 +66,7 @@ public:
     };
 
     struct Information {
-        struct {
-            uint8_t major, backup;
-        } firmware;
+        RainSensor::FirmwareVersion firmware;
     };
 
 private:
@@ -89,7 +87,7 @@ public:
             return Result (false, "DFRobot_IICSerial::begin");
         // if (! _device.setSleepMode (false))
         //     return ComponentResult (false, "RainSensor::setSleepMode (false)");
-        if (! _device.getFirmwareVersion (_info.firmware.major, _info.firmware.backup))
+        if (! _device.getFirmwareVersion (_info.firmware))
             return Result (false, "RainSensor::getFirmwareVersion");
         StatusType status;
         if (! _device.getSystemStatus (status))
@@ -107,8 +105,8 @@ public:
     }
     void debugDump () const {
         Serial.printf ("Temperature = %.2f\n", _measurements.t);
-        Serial.printf ("Rainfall = %s\n", frame_data_rainfall_status_t::toString (_measurements.rainfall).c_str ());
-        Serial.printf ("Status = %s\n", frame_data_system_status_t::toString (_measurements.s).c_str ());
+        Serial.printf ("Rainfall = %s\n", frame_data_rainfall_status_t::toString (_measurements.rainfall));
+        Serial.printf ("Status = %s\n", frame_data_system_status_t::toString (_measurements.s));
     }
 
     MeasurementResult measurementsExecute () {
@@ -138,16 +136,17 @@ public:
         config (conf),
         _serial (i2cbus_device::wire (), config.uart, config.A1, config.A0),
         _device (
-            [&] (const uint8_t *data, size_t len) -> size_t {
+            [&] (const uint8_t *data, const size_t len) -> size_t {
                 return _serial.write (data, len);
             },
-            [&] (uint8_t *data, size_t len) -> size_t {
+            [&] (uint8_t *data, const size_t len) -> size_t {
                 size_t got = 0;
                 int value;
                 while (got < len && (value = _serial.read ()) != -1)
                     data [got++] = value & 0xFF;
                 return got;
-            }) { }
+            },
+            [] { delay (50); }) { }
 };
 
 // -----------------------------------------------------------------------------------------------
