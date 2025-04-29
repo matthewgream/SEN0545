@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <optional>
 
-//#define DEBUG_SEN0545
+// #define DEBUG_SEN0545
 #ifdef DEBUG_SEN0545
 #define DEBUG_SEN0545_PRINTF Serial.printf
 #else
@@ -156,7 +156,7 @@ struct __attribute__ ((__packed__)) frame_data_threshold_n_t {
 struct __attribute__ ((__packed__)) frame_data_temperature_t {
     uint16_t value;
     static inline constexpr float toFloat (uint16_t temperature) {
-        return (static_cast<float> (temperature) - 605.36) / -1.5596; // Figure 2.1. ZLG RS200
+        return (static_cast<float> (temperature) - 605.36) / -1.5596;    // Figure 2.1. ZLG RS200
     }
 };
 
@@ -311,7 +311,6 @@ public:
     bool read (const FrameType &type, T &value) const {
         if (! transceiver.transmit (frame_command_t { .flags = FRAME_FLAGS_ENCODE (FrameProperty::Read, type) }))
             return false;
-        delay (1);
         const auto response = transceiver.receive ();
         if (! response || FRAME_FLAGS_DECODE_TYPE (response->flags) != type)
             return false;
@@ -323,9 +322,7 @@ public:
         return transceiver.transmit (frame_command_t { .flags = FRAME_FLAGS_ENCODE (FrameProperty::Write, type), .data = FRAME_DATA_ENCODE (value) });
     }
 
-    bool _setEnterOrExitMode (const FrameType &type, const bool enabled) const { 
-        return write (type, frame_data_enterorexit_t { .command = enabled ? frame_data_enterorexit_t::command_t::Enter : frame_data_enterorexit_t::command_t::Exit }); 
-    }
+    bool _setEnterOrExitMode (const FrameType &type, const bool enabled) const { return write (type, frame_data_enterorexit_t { .command = enabled ? frame_data_enterorexit_t::command_t::Enter : frame_data_enterorexit_t::command_t::Exit }); }
 
     //
 
@@ -370,7 +367,7 @@ public:
     bool getThreshold (const Thresholds type, ThresholdType &value) const { return read (static_cast<FrameType> (type), value); }
     using TemperatureType = float;
     bool getTemperature (TemperatureType &value) const {
-        frame_data_temperature_t temperature{};
+        frame_data_temperature_t temperature {};
         if (! read (FrameType::Temperature, temperature))
             return false;
         value = frame_data_temperature_t::toFloat (temperature.value);
