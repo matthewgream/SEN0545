@@ -75,7 +75,7 @@ private:
     Measurements _measurements;
     Information _info;
 
-    static uint8_t _address (const bool a1, const bool a0, const int uart) {
+    static uint8_t _address (const bool a1, const bool a0, const int uart) {    // address selection dip
         return (uint8_t) ((0 << 7) | (static_cast<uint8_t> (a1) << 6) | (static_cast<uint8_t> (a0) << 5) | (1 << 4) | (0 << 3) | ((uart & 0x03) << 1) | (0 << 0));
     }
 
@@ -98,9 +98,7 @@ public:
         _serial.end ();
         return true;
     }
-    String information () const {
-        return "i2c=0x" + String (_address (config.A1, config.A0, config.uart), HEX) + ", firmware=" + String (_info.firmware.major) + "." + String (_info.firmware.backup) + ", status=" + frame_data_system_status_t::toString (_measurements.s);
-    }
+    String information () const { return "i2c=0x" + String (_address (config.A1, config.A0, config.uart), HEX) + ", firmware=" + String (_info.firmware.major) + "." + String (_info.firmware.backup) + ", status=" + frame_data_system_status_t::toString (_measurements.s); }
     void debugDump () const {
         Serial.printf ("Temperature = %.2f\n", _measurements.t);
         Serial.printf ("Rainfall = %s\n", frame_data_rainfall_status_t::toString (_measurements.rainfall));
@@ -133,18 +131,15 @@ public:
         i2cbus_device (i2cbus),
         config (conf),
         _serial (i2cbus_device::wire (), config.uart, config.A1, config.A0),
-        _device (
-            [&] (const uint8_t *data, const size_t len) -> size_t {
-                return _serial.write (data, len);
-            },
-            [&] (uint8_t *data, const size_t len) -> size_t {
-                size_t got = 0;
-                int value;
-                while (got < len && (value = _serial.read ()) != -1)
-                    data [got++] = value & 0xFF;
-                return got;
-            },
-            [] { delay (50); }) { }
+        _device ([&] (const uint8_t *data, const size_t len) -> size_t { return _serial.write (data, len); },
+                 [&] (uint8_t *data, const size_t len) -> size_t {
+                     size_t got = 0;
+                     int value;
+                     while (got < len && (value = _serial.read ()) != -1)
+                         data [got++] = value & 0xFF;
+                     return got;
+                 },
+                 [] { delay (50); }) { }
 };
 
 // -----------------------------------------------------------------------------------------------

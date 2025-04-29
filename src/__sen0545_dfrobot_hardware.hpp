@@ -50,8 +50,11 @@ static inline constexpr uint8_t FrameFCS = 0x00;
 
 // Type 0: Firmware Version - two 8-bit values
 struct __attribute__ ((__packed__)) frame_data_firmware_version_t {
-    uint8_t major;
-    uint8_t backup;
+    struct version_t {
+        uint8_t backup, major;    // LSB first
+    };
+    uint16_t version;
+    static constexpr version_t toVersion (const uint16_t version) { return version_t { .backup = static_cast<uint8_t> (version & 0xFF), .major = static_cast<uint8_t> ((version >> 8) & 0xFF) }; }
 };
 
 // Type 1: Rainfall Status - enumerated status
@@ -155,7 +158,7 @@ struct __attribute__ ((__packed__)) frame_data_threshold_n_t {
 // Type 16: Temperature Reading - command value: always 0 for reading temperature
 struct __attribute__ ((__packed__)) frame_data_temperature_t {
     uint16_t value;
-    static inline constexpr float toFloat (uint16_t temperature) {
+    static constexpr float toFloat (const uint16_t temperature) {
         return (static_cast<float> (temperature) - 605.36) / -1.5596;    // Figure 2.1. ZLG RS200
     }
 };
@@ -174,7 +177,7 @@ union __attribute__ ((__packed__)) frame_data_t {
     frame_data_enterorexit_t ambient_light;
     frame_data_temperature_t temperature;
     frame_data_enterorexit_t sleep_mode;
-    uint8_t __bytes [2];
+    uint8_t __bytes [2] = { 0x00, 0x00 };
 };
 
 struct __attribute__ ((__packed__)) frame_command_t {
@@ -186,12 +189,14 @@ static inline constexpr FrameType FRAME_FLAGS_DECODE_TYPE (const uint8_t flags) 
 static inline constexpr uint8_t FRAME_FLAGS_ENCODE_PROPERTY (const FrameProperty property) { return (static_cast<uint8_t> (property) << 7) & 0x80U; }
 static inline constexpr uint8_t FRAME_FLAGS_ENCODE_TYPE (const FrameType type) { return static_cast<uint8_t> (type) & 0x7FU; }
 static inline constexpr uint8_t FRAME_FLAGS_ENCODE (const FrameProperty property, const FrameType type) { return FRAME_FLAGS_ENCODE_PROPERTY (property) | FRAME_FLAGS_ENCODE_TYPE (type); }
-// little endian
 template <typename T>
 static inline constexpr frame_data_t FRAME_DATA_ENCODE (const T &type) {
-    return { .__bytes = { static_cast<uint8_t> ((reinterpret_cast<const uint16_t &> (type) >> 0) & 0xFF), static_cast<uint8_t> ((reinterpret_cast<const uint16_t &> (type) >> 8) & 0xFF) } };
+    return { .__bytes = { static_cast<uint8_t> (reinterpret_cast<const uint16_t &> (type) & 0xFF), static_cast<uint8_t> ((reinterpret_cast<const uint16_t &> (type) >> 8) & 0xFF) } };    // LSB first
 }
-static inline constexpr uint16_t FRAME_DATA_DECODE (const frame_data_t &data) { return static_cast<uint16_t> (data.__bytes [1] << 8) | static_cast<uint16_t> (data.__bytes [0]); }
+template <typename T>
+static inline constexpr T FRAME_DATA_DECODE (const frame_data_t &data) {
+    return static_cast<T> (static_cast<uint16_t> (static_cast<uint16_t> (data.__bytes [1] << 8) | static_cast<uint16_t> (data.__bytes [0])));    // LSB first
+}
 
 struct __attribute__ ((__packed__)) frame_t {
     const uint8_t header = FrameHeader;
@@ -201,6 +206,16 @@ struct __attribute__ ((__packed__)) frame_t {
 
 // -----------------------------------------------------------------------------------------------
 // -----------------------------------------------------------------------------------------------
+
+// static inline uint8_t crc8 (const uint8_t *data, size_t len) {
+//     uint8_t crc = 0xFF;
+//     while (len--) {
+//         crc ^= *data++;
+//         for (uint8_t i = 0; i < 8; i++)
+//             crc = (crc & 0x80) ? (crc << 1) ^ 0x31 : (crc << 1);
+//     }
+//     return crc;
+// }
 
 template <uint8_t poly>
 static inline constexpr uint32_t __crc8_bit (uint32_t crc) {
@@ -314,7 +329,7 @@ public:
         const auto response = transceiver.receive ();
         if (! response || FRAME_FLAGS_DECODE_TYPE (response->flags) != type)
             return false;
-        value = static_cast<T> (FRAME_DATA_DECODE (response->data));
+        value = FRAME_DATA_DECODE<T> (response->data);
         return true;
     }
     template <typename T>
@@ -326,8 +341,14 @@ public:
 
     //
 
-    using FirmwareVersion = frame_data_firmware_version_t;
-    bool getFirmwareVersion (FirmwareVersion &version) const { return read (FrameType::FirmwareVersion, version); }
+    using FirmwareVersion = frame_data_firmware_version_t::version_t;
+    bool getFirmwareVersion (FirmwareVersion &version) const {
+        frame_data_firmware_version_t frame;
+        if (! read (FrameType::FirmwareVersion, frame))
+            return false;
+        version = frame_data_firmware_version_t::toVersion (frame.version);
+        return true;
+    }
     using SystemStatus = frame_data_system_status_t::status_t;
     bool getSystemStatus (frame_data_system_status_t::status_t &status) const { return read (FrameType::SystemStatus, status); }
     using RainfallStatus = frame_data_rainfall_status_t::status_t;
@@ -367,10 +388,10 @@ public:
     bool getThreshold (const Thresholds type, ThresholdType &value) const { return read (static_cast<FrameType> (type), value); }
     using TemperatureType = float;
     bool getTemperature (TemperatureType &value) const {
-        frame_data_temperature_t temperature {};
-        if (! read (FrameType::Temperature, temperature))
+        frame_data_temperature_t frame;
+        if (! read (FrameType::Temperature, frame))
             return false;
-        value = frame_data_temperature_t::toFloat (temperature.value);
+        value = frame_data_temperature_t::toFloat (frame.value);
         return true;
     }
     bool setAmbientLightMode (const bool enabled) const { return _setEnterOrExitMode (FrameType::AmbientLight, enabled); }
