@@ -107,12 +107,16 @@ void setup () {
     delay (5 * 1000);
     Serial.println ("UP");
 
-    i2cbus0 = std::make_unique<i2cbus> (i2cbus::Config { .num = 0, .pin_SDA = GPIO_NUM_0, .pin_SCL = GPIO_NUM_1 });
+    i2cbus0 = std::make_unique<i2cbus> (i2cbus::Config { .num = 0, .pin_SDA = GPIO_NUM_5, .pin_SCL = GPIO_NUM_4 });
     i2cbus0->begin ();
     Serial.printf ("i2cbus0: %s\n", i2cbus0->status ().c_str ());
 
-    sen0545 = std::make_unique<SensorDevice_DfrobotSEN0545> (SensorDevice_DfrobotSEN0545::Config { .A0 = false, .A1 = false, .uart = 0 }, *i2cbus0);
-    sen0545->begin ();
+    sen0545 = std::make_unique<SensorDevice_DfrobotSEN0545> (SensorDevice_DfrobotSEN0545::Config { .A0 = false, .A1 = true, .uart = 0 }, *i2cbus0);
+    const auto result = sen0545->begin ();
+    if (!result.success) {
+        Serial.printf ("sen0545: failed to begin(): %s\n", result.details.c_str ());
+        return;
+    }
     Serial.printf ("sen0545: %s\n", sen0545->information ().c_str ());
 }
 
